@@ -1,0 +1,939 @@
+<!DOCTYPE html>
+
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>מערכת שכר שחיטה</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;700;900&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet"/>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:#f5f2eb;font-family:'Heebo',sans-serif;color:#1a1208;}
+  ::-webkit-scrollbar{width:4px;}::-webkit-scrollbar-thumb{background:#ddd8cc;}
+  .card{background:#fff;border:1px solid #ddd8cc;border-radius:4px;}
+  .btn{border:none;cursor:pointer;font-family:'Heebo',sans-serif;font-size:13px;font-weight:600;border-radius:3px;padding:8px 18px;transition:all .15s;}
+  .btn-p{background:#b85c00;color:#fff;}.btn-p:hover{opacity:.88;}
+  .btn-s{background:#1d5fa8;color:#fff;}.btn-s:hover{opacity:.88;}
+  .btn-g{background:#1a7a3c;color:#fff;}.btn-g:hover{opacity:.88;}
+  .btn-sm{padding:5px 12px;font-size:12px;}
+  .input{background:#f5f2eb;border:1.5px solid #ddd8cc;color:#1a1208;padding:9px 12px;font-family:'Heebo',sans-serif;font-size:13px;border-radius:3px;width:100%;outline:none;transition:border .15s;}
+  .input:focus{border-color:#b85c00;background:#fff;}
+  .mono{font-family:'IBM Plex Mono',monospace;}
+  .tab{padding:12px 18px;cursor:pointer;font-size:13px;font-weight:500;border:none;background:transparent;font-family:'Heebo',sans-serif;transition:all .15s;color:#8a7f6e;border-bottom:2.5px solid transparent;white-space:nowrap;}
+  .tab.on{color:#b85c00;border-bottom-color:#b85c00;font-weight:700;}
+  .tab:hover:not(.on){color:#1a1208;}
+  .chip{display:flex;align-items:center;padding:9px 12px;border:1.5px solid #ddd8cc;border-radius:4px;cursor:pointer;transition:all .15s;gap:8px;}
+  .chip:hover{border-color:#8a7f6e;}
+  .chip.on-sl{border-color:#b85c00!important;background:#fff3e8!important;}
+  .chip.on-in{border-color:#1d5fa8!important;background:#edf3fc!important;}
+  @keyframes sd{from{opacity:0;transform:translateY(-5px)}to{opacity:1;transform:translateY(0)}}
+  .slide{animation:sd .25s ease;}
+  table{border-collapse:collapse;width:100%;}
+  select.input{cursor:pointer;}
+  .modal{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:1000;direction:rtl;}
+  .modal-content{background:#fff;border-radius:8px;padding:24px;maxWidth:600px;width:90%;max-height:80vh;overflow-y:auto;}
+  .modal-close{float:left;background:none;border:none;font-size:24px;cursor:pointer;color:#8a7f6e;}
+  .override-val{background:#d4e5f7;color:#1d5fa8;padding:3px 8px;border-radius:3px;font-weight:700;font-family:'IBM Plex Mono',monospace;}
+  @keyframes chicken-bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
+  .chicken-icon{animation:chicken-bob 0.6s ease-in-out infinite;}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect } = React;
+
+const C = {
+bg:”#f5f2eb”,panel:”#ffffff”,dark:”#1a1208”,
+border:”#ddd8cc”,accent:”#b85c00”,accentLight:”#fff3e8”,
+gold:”#c8960c”,goldLight:”#fffbe6”,
+green:”#1a7a3c”,greenLight:”#edfaf3”,
+red:”#c0392b”,redLight:”#fef0ee”,
+blue:”#1d5fa8”,blueLight:”#edf3fc”,
+muted:”#8a7f6e”,text:”#1a1208”,
+};
+
+const LINES = [
+{name:“מחפוד 2”,color:C.accent, bg:C.accentLight},
+{name:“מחפוד 1”,color:”#7a4200”,bg:”#fff8f2”},
+{name:“רובין”,  color:C.blue,   bg:C.blueLight},
+{name:“שארית”, color:C.muted,  bg:”#f3f1ee”},
+];
+
+function calcSlaughtererAuto(lineChickens, numSl, rate) {
+if (!numSl || !lineChickens) return 0;
+return Math.max((lineChickens / numSl * rate) / 100, 250);
+}
+function calcInspector(totalChickens, rate=3) {
+if (!totalChickens) return 0;
+if (totalChickens <= 5000) return Math.max((totalChickens * rate) / 100, 200);
+return 200 + ((totalChickens - 5000) * rate) / 100;
+}
+
+const fmt = n => `₪${Number(n).toLocaleString("he-IL",{minimumFractionDigits:2,maximumFractionDigits:2})}`;
+const todayISO = () => new Date().toISOString().split(“T”)[0];
+const fmtDate = d => new Date(d+“T00:00:00”).toLocaleDateString(“he-IL”,{weekday:“short”,day:“2-digit”,month:“2-digit”,year:“numeric”});
+const fmtMonthHe = m => { const [y,mo]=m.split(”-”); return `${["ינואר","פברואר","מרץ","אפריל","מאי","יוני","יולי","אוגוסט","ספטמבר","אוקטובר","נובמבר","דצמבר"][+mo-1]} ${y}`; };
+const genId = () => Date.now()+Math.random();
+
+const INIT_WORKERS = {
+slaughterers:[
+{id:1,name:“אברהם כהן”, rate:22},
+{id:2,name:“יצחק לוי”,  rate:24},
+{id:3,name:“יעקב מזרחי”,rate:22},
+],
+inspectors:[
+{id:10,name:“שמואל פרידמן”},
+{id:11,name:“דוד רוזנברג”},
+],
+};
+
+const initLineDay = () => Object.fromEntries(
+LINES.map(l => [l.name,{
+active: l.name===“מחפוד 2”||l.name===“מחפוד 1”,
+chickens:””,
+slaughterers:{},
+overrides:{},
+}])
+);
+
+function Label({children}){
+return <div style={{fontSize:12,color:C.muted,marginBottom:5,fontWeight:500}}>{children}</div>;
+}
+function STitle({children,color}){
+return <div style={{fontSize:13,fontWeight:700,color,display:“flex”,alignItems:“center”,gap:7}}>
+<div style={{width:3,height:15,background:color,borderRadius:2}}/>
+{children}
+
+  </div>;
+}
+function Pill({label,val,color}){
+  return <div style={{background:"#fff",border:"1px solid #e8e4dc",borderRadius:4,padding:"6px 14px",textAlign:"center"}}>
+    <div className="mono" style={{fontWeight:700,fontSize:15,color}}>{val}</div>
+    <div style={{fontSize:10,color:C.muted}}>{label}</div>
+  </div>;
+}
+function WorkerPanel({title,color,workers,onRemove,form}){
+  return <div className="card" style={{padding:20}}>
+    <STitle color={color}>{title}</STitle>
+    <div style={{margin:"12px 0"}}>
+      {workers.map(w=>(
+        <div key={w.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderBottom:"1px solid #e8e4dc"}}>
+          <div>
+            <div style={{fontWeight:600,fontSize:13}}>{w.name}</div>
+            {w.rate&&<span style={{fontSize:11,background:color+"22",color,padding:"1px 7px",borderRadius:2,fontWeight:700}}>{w.rate} אגורות</span>}
+          </div>
+          <button onClick={()=>onRemove(w.id)} style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:16}}>✕</button>
+        </div>
+      ))}
+    </div>
+    {form}
+  </div>;
+}
+
+// ════════════════════════════════
+function App(){
+const [tab,setTab]           = useState(0);
+const [workers,setWorkers]   = useState(INIT_WORKERS);
+const [sessions,setSessions] = useState([]);
+const [date,setDate]         = useState(todayISO);
+const [lineDay,setLineDay]   = useState(initLineDay);
+const [activeInspectors,setActiveInspectors] = useState({});
+const [inspectorRate,setInspectorRate] = useState(3);
+const [inspectorOverride,setInspectorOverride] = useState({});
+const [newSl,setNewSl]       = useState({name:””,rate:“22”});
+const [newIn,setNewIn]       = useState({name:””});
+const [reportMonth,setReportMonth] = useState(()=>new Date().toISOString().slice(0,7));
+const [reportLine,setReportLine]   = useState(“הכל”);
+const [workerModal,setWorkerModal] = useState(null);
+
+useEffect(()=>{
+try{
+const s=localStorage.getItem(“shechita_v5_sessions”);
+const w=localStorage.getItem(“shechita_v5_workers”);
+if(s)setSessions(JSON.parse(s));
+if(w)setWorkers(JSON.parse(w));
+}catch{}
+},[]);
+
+const persist=(ns,nw)=>{
+try{
+localStorage.setItem(“shechita_v5_sessions”,JSON.stringify(ns??sessions));
+localStorage.setItem(“shechita_v5_workers”, JSON.stringify(nw??workers));
+}catch{}
+};
+
+const updateLine=(name,patch)=>setLineDay(p=>({…p,[name]:{…p[name],…patch}}));
+const toggleSlInLine=(name,wid)=>setLineDay(p=>({…p,[name]:{…p[name],slaughterers:{…p[name].slaughterers,[wid]:!p[name].slaughterers[wid]}}}));
+const setOverrideInLine=(name,wid,val)=>setLineDay(p=>({…p,[name]:{…p[name],overrides:{…p[name].overrides,[wid]:val}}}));
+const clearOverrideInLine=(name,wid)=>setLineDay(p=>{const ov={…p[name].overrides};delete ov[wid];return {…p,[name]:{…p[name],overrides:ov}};});
+
+// Inspector chickens: average of מחפוד 1 and מחפוד 2
+const machpod1 = () => lineResults.find(r => r.name === “מחפוד 1”)?.chickens || 0;
+const machpod2 = () => lineResults.find(r => r.name === “מחפוד 2”)?.chickens || 0;
+
+const lineResults = LINES.map(l=>{
+const ld=lineDay[l.name];
+if(!ld.active) return {…l,active:false};
+const chickens=parseInt(ld.chickens)||0;
+const activeSl=workers.slaughterers.filter(w=>ld.slaughterers[w.id]);
+const numSl=activeSl.length;
+const slRows=activeSl.map(w=>{
+const autoPay=calcSlaughtererAuto(chickens,numSl,w.rate);
+const override=ld.overrides[w.id];
+const pay=override!==undefined?override:autoPay;
+return{
+…w,
+chickensEach:numSl?Math.round(chickens/numSl):0,
+autoPay, pay,
+isOverride: override!==undefined,
+minApplied: !override&&numSl&&(chickens/numSl*w.rate)/100<250,
+};
+});
+return{…l,active:true,chickens,slRows,numSl};
+});
+
+const getInspectorChickens = () => (machpod1() + machpod2()) / 2;
+const inspectorChickens = getInspectorChickens();
+const activeIn=workers.inspectors.filter(w=>activeInspectors[w.id]);
+const inAutoPay=calcInspector(inspectorChickens,inspectorRate);
+const inPay=(id)=>{ const ov=inspectorOverride[id]; return ov!==undefined?ov:inAutoPay; };
+const inMinApplied=inspectorChickens<=5000&&(inspectorChickens*inspectorRate/100)<200;
+const totalPay=
+lineResults.reduce((s,r)=>s+(r.slRows||[]).reduce((a,w)=>a+w.pay,0),0)+
+activeIn.reduce((s,w)=>s+inPay(w.id),0);
+
+function saveSession(){
+const activeLines=lineResults.filter(r=>r.active&&r.chickens>0&&r.slRows?.length>0);
+if(!activeLines.length) return;
+const session={
+id:genId(),date,
+lines:activeLines.map(r=>({
+name:r.name,color:r.color,chickens:r.chickens,
+slaughterers:r.slRows.map(w=>({id:w.id,name:w.name,rate:w.rate,pay:w.pay,chickensEach:w.chickensEach,minApplied:w.minApplied,isOverride:w.isOverride})),
+})),
+inspectors:activeIn.map(w=>({id:w.id,name:w.name,pay:inPay(w.id),minApplied:inMinApplied,isOverride:inspectorOverride[w.id]!==undefined})),
+inspectorRate,inspectorChickens,totalChickens:machpod1()+machpod2(),totalPay,
+};
+const next=[session,…sessions.filter(s=>s.date!==date)].sort((a,b)=>b.date.localeCompare(a.date));
+setSessions(next);persist(next,null);
+setLineDay(initLineDay());setActiveInspectors({});
+setInspectorRate(3);setInspectorOverride({});setTab(2);
+}
+
+function addSlaughterer(){
+if(!newSl.name.trim())return;
+const next={…workers,slaughterers:[…workers.slaughterers,{id:genId(),name:newSl.name.trim(),rate:+newSl.rate}]};
+setWorkers(next);persist(null,next);setNewSl({name:””,rate:“22”});
+}
+function addInspector(){
+if(!newIn.name.trim())return;
+const next={…workers,inspectors:[…workers.inspectors,{id:genId(),name:newIn.name.trim()}]};
+setWorkers(next);persist(null,next);setNewIn({name:””});
+}
+function removeWorker(type,id){
+const next={…workers,[type]:workers[type].filter(w=>w.id!==id)};
+setWorkers(next);persist(null,next);
+}
+function removeSession(id){
+const next=sessions.filter(s=>s.id!==id);
+setSessions(next);persist(next,null);
+}
+
+function saveToFile(){
+const data={workers,sessions};
+const json=JSON.stringify(data,null,2);
+const blob=new Blob([json],{type:“application/json”});
+const url=URL.createObjectURL(blob);
+const a=document.createElement(“a”);
+a.href=url;
+a.download=`shechita_backup_${new Date().toISOString().slice(0,10)}.json`;
+document.body.appendChild(a);
+a.click();
+document.body.removeChild(a);
+URL.revokeObjectURL(url);
+}
+
+function loadFromFile(){
+const input=document.createElement(“input”);
+input.type=“file”;
+input.accept=”.json”;
+input.onchange=e=>{
+const file=e.target.files[0];
+if(!file)return;
+const reader=new FileReader();
+reader.onload=ev=>{
+try{
+const data=JSON.parse(ev.target.result);
+if(data.workers&&data.sessions){
+setWorkers(data.workers);
+setSessions(data.sessions);
+persist(data.sessions,data.workers);
+alert(“✅ הנתונים נטענו בהצלחה!”);
+}else{
+alert(“❌ קובץ לא תקין”);
+}
+}catch(err){
+alert(“❌ שגיאה בטעינת הקובץ”);
+}
+};
+reader.readAsText(file);
+};
+input.click();
+}
+
+// Export to Excel
+function exportToExcel(){
+const monthSet=[…new Set(sessions.map(s=>s.date.slice(0,7)))].sort().reverse();
+const rSessions=sessions.filter(s=>s.date.startsWith(reportMonth));
+const filtered=reportLine===“הכל”?rSessions:rSessions.filter(s=>s.lines.some(l=>l.name===reportLine));
+
+```
+let rows = [];
+rows.push(["סיכום חודשי",fmtMonthHe(reportMonth)]);
+rows.push([]);
+rows.push(["תאריך","ליין","עופות","שוחט","שכר"]);
+
+filtered.forEach(sess=>{
+  const lines=reportLine==="הכל"?sess.lines:sess.lines.filter(l=>l.name===reportLine);
+  lines.forEach(line=>{
+    line.slaughterers.forEach(w=>{
+      rows.push([sess.date,line.name,w.chickensEach,w.name,w.pay]);
+    });
+  });
+});
+
+rows.push([]);
+rows.push(["סה\"כ",fmtMonthHe(reportMonth)]);
+filtered.forEach(sess=>{
+  sess.inspectors?.forEach(w=>{
+    rows.push(["בודק",sess.date,w.name,w.pay]);
+  });
+});
+
+const ws = XLSX.utils.aoa_to_sheet(rows);
+const wb = XLSX.utils.book_new();
+XLSX.utils.book_append_sheet(wb, ws, "דוח");
+XLSX.writeFile(wb, `shechita_${reportMonth}.xlsx`);
+```
+
+}
+
+// Export to PDF
+function exportToPDF(){
+const element = document.getElementById(“pdf-content”);
+const opt = { margin:10, filename:`shechita_${reportMonth}.pdf`, image:{type:“jpeg”,quality:0.98}, html2canvas:{scale:2}, jsPDF:{orientation:“portrait”,unit:“mm”,format:“a4”}};
+html2pdf().set(opt).from(element).save();
+}
+
+const thisMonth=new Date().toISOString().slice(0,7);
+const mSessions=sessions.filter(s=>s.date.startsWith(thisMonth));
+const mChickens=mSessions.reduce((s,r)=>s+r.totalChickens,0);
+const mPay=mSessions.reduce((s,r)=>s+r.totalPay,0);
+
+return (
+<div style={{fontFamily:”‘Heebo’,sans-serif”,background:C.bg,minHeight:“100vh”,color:C.text,direction:“rtl”}}>
+
+```
+  {/* HEADER */}
+  <div style={{background:C.dark,padding:"0 24px",display:"flex",alignItems:"center",justifyContent:"space-between",height:58,gap:16}}>
+    <div style={{display:"flex",alignItems:"center",gap:10}}>
+      <div style={{width:34,height:34,background:C.accent,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}} className="chicken-icon">🐔</div>
+      <div>
+        <div style={{color:"#fff",fontWeight:900,fontSize:15}}>מערכת שכר שחיטה</div>
+        <div style={{display:"flex",gap:10,marginTop:1}}>
+          {LINES.map(l=><span key={l.name} style={{fontSize:10,color:l.color,display:"flex",alignItems:"center",gap:3}}>
+            <span style={{width:5,height:5,borderRadius:"50%",background:l.color,display:"inline-block"}}/>
+            {l.name}
+          </span>)}
+        </div>
+      </div>
+    </div>
+    <div style={{display:"flex",gap:12,alignItems:"center"}}>
+      <button onClick={saveToFile} title="שמור קובץ" style={{background:"none",border:"none",color:"#fff",cursor:"pointer",fontSize:20,padding:"8px 12px",borderRadius:4,transition:"all .2s"}} onMouseEnter={e=>e.target.style.background="rgba(255,255,255,0.1)"} onMouseLeave={e=>e.target.style.background="none"}>💾</button>
+      <button onClick={loadFromFile} title="פתח קובץ" style={{background:"none",border:"none",color:"#fff",cursor:"pointer",fontSize:20,padding:"8px 12px",borderRadius:4,transition:"all .2s"}} onMouseEnter={e=>e.target.style.background="rgba(255,255,255,0.1)"} onMouseLeave={e=>e.target.style.background="none"}>📁</button>
+      <div style={{width:1,height:30,background:"rgba(255,255,255,0.2)"}}/>
+      <div style={{display:"flex",gap:16}}>
+        <div style={{textAlign:"center"}}>
+          <div className="mono" style={{color:C.gold,fontWeight:700,fontSize:13}}>{mChickens.toLocaleString()}</div>
+          <div style={{color:C.muted,fontSize:10}}>עוף החודש</div>
+        </div>
+        <div style={{textAlign:"center"}}>
+          <div className="mono" style={{color:C.green,fontWeight:700,fontSize:13}}>{fmt(mPay)}</div>
+          <div style={{color:C.muted,fontSize:10}}>שכר החודש</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {/* TABS */}
+  <div style={{background:C.panel,borderBottom:`1px solid ${C.border}`,display:"flex",padding:"0 16px",overflowX:"auto"}}>
+    {["📋 רישום יומי","👥 עובדים","📅 היסטוריה","📊 דוחות","👤 לפי עובד"].map((t,i)=>(
+      <button key={i} className={`tab ${tab===i?"on":""}`} onClick={()=>setTab(i)}>{t}</button>
+    ))}
+  </div>
+
+  <div style={{maxWidth:940,margin:"0 auto",padding:"22px 14px"}}>
+
+    {/* ══ TAB 0 — DAILY ══ */}
+    {tab===0&&(
+      <div className="slide">
+        <div className="card" style={{padding:"14px 18px",marginBottom:14,display:"flex",gap:16,alignItems:"flex-end",flexWrap:"wrap"}}>
+          <div style={{minWidth:170}}>
+            <Label>תאריך</Label>
+            <input type="date" className="input" value={date} onChange={e=>setDate(e.target.value)}/>
+          </div>
+          {machpod1()+machpod2()>0&&(
+            <div style={{display:"flex",gap:10,paddingBottom:2}}>
+              <Pill label="סה״כ עוף" val={(machpod1()+machpod2()).toLocaleString()} color={C.gold}/>
+              <Pill label="סה״כ שכר" val={fmt(totalPay)} color={C.green}/>
+            </div>
+          )}
+        </div>
+
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(420px,1fr))",gap:14,marginBottom:14}}>
+          {LINES.map(l=>{
+            const ld=lineDay[l.name];
+            const res=lineResults.find(r=>r.name===l.name);
+            return(
+              <div key={l.name} className="card" style={{border:`1.5px solid ${ld.active?l.color:C.border}`,overflow:"hidden",opacity:ld.active?1:0.6,transition:"all .2s"}}>
+                <div style={{background:ld.active?l.bg:"#faf9f7",padding:"11px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",borderBottom:`1px solid ${ld.active?l.color+"44":C.border}`,cursor:"pointer"}}
+                  onClick={()=>updateLine(l.name,{active:!ld.active})}>
+                  <div style={{display:"flex",alignItems:"center",gap:10}}>
+                    <div style={{width:10,height:10,borderRadius:"50%",background:ld.active?l.color:C.border,transition:"background .2s"}}/>
+                    <span style={{fontWeight:700,fontSize:14,color:ld.active?l.color:C.muted}}>{l.name}</span>
+                  </div>
+                  <span style={{fontSize:11,color:C.muted}}>{ld.active?"▼ פעיל":"▶ כבוי"}</span>
+                </div>
+
+                {ld.active&&(
+                  <div style={{padding:"14px 16px"}}>
+                    <div style={{marginBottom:14}}>
+                      <Label>עופות בליין</Label>
+                      <input type="number" className="input" placeholder="0" value={ld.chickens}
+                        onChange={e=>updateLine(l.name,{chickens:e.target.value})} min="0"
+                        style={{borderColor:ld.chickens?l.color+"88":C.border}}/>
+                    </div>
+
+                    <Label>שוחטים בליין</Label>
+                    <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:10}}>
+                      {workers.slaughterers.map(w=>{
+                        const on=!!ld.slaughterers[w.id];
+                        const slRow=on&&res?.slRows?.find(r=>r.id===w.id);
+                        const hasOverride=ld.overrides[w.id]!==undefined;
+                        return(
+                          <div key={w.id} className={`chip ${on?"on-sl":""}`}
+                            style={{borderColor:on?l.color:C.border,background:on?l.bg:"transparent"}}
+                            onClick={()=>toggleSlInLine(l.name,w.id)}>
+                            <div style={{fontWeight:600,fontSize:13,minWidth:90}}>{w.name}</div>
+
+                            {on&&(
+                              <div style={{display:"flex",alignItems:"center",gap:6,marginRight:"auto"}} onClick={e=>e.stopPropagation()}>
+                                {!hasOverride&&slRow&&(
+                                  <span className="mono" style={{fontSize:12,color:C.muted}}>{fmt(slRow.autoPay)}</span>
+                                )}
+                                <input
+                                  type="number" min="0" step="1"
+                                  placeholder={slRow?Math.round(slRow.autoPay):"שכר"}
+                                  value={hasOverride?ld.overrides[w.id]:""}
+                                  onChange={e=>{
+                                    const v=e.target.value;
+                                    if(v===""||v===null) clearOverrideInLine(l.name,w.id);
+                                    else setOverrideInLine(l.name,w.id,parseFloat(v)||0);
+                                  }}
+                                  style={{width:78,padding:"3px 7px",fontSize:12,border:`1.5px solid ${hasOverride?C.blue:C.border}`,borderRadius:3,background:"#fff",fontFamily:"'IBM Plex Mono',monospace",fontWeight:700,color:hasOverride?C.blue:C.muted,outline:"none",textAlign:"center"}}
+                                />
+                                <span style={{fontSize:10,color:hasOverride?C.blue:C.muted}}>{hasOverride?"ידני":"₪"}</span>
+                              </div>
+                            )}
+
+                            {slRow?(
+                              <div style={{textAlign:"left",minWidth:80}}>
+                                {hasOverride
+                                  ?<div className="override-val">{fmt(slRow.pay)}</div>
+                                  :<div className="mono" style={{fontWeight:700,color:l.color,fontSize:13}}>{fmt(slRow.pay)}</div>
+                                }
+                                {slRow.minApplied&&!hasOverride&&<div style={{fontSize:9,color:C.red}}>מינימום</div>}
+                                {!slRow.minApplied&&!hasOverride&&<div style={{fontSize:9,color:C.muted}}>{slRow.chickensEach.toLocaleString()} עוף</div>}
+                              </div>
+                            ):(
+                              <div style={{width:18,height:18,borderRadius:"50%",border:`2px solid ${on?l.color:C.border}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,color:l.color}}>{on?"✓":""}</div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {res?.slRows?.length>0&&res.chickens>0&&(
+                      <div style={{padding:"7px 10px",background:l.bg,borderRadius:3,fontSize:12,display:"flex",justifyContent:"space-between"}}>
+                        <span style={{color:C.muted}}>{res.chickens.toLocaleString()} ÷ {res.numSl} = {Math.round(res.chickens/res.numSl).toLocaleString()} לשוחט</span>
+                        <span className="mono" style={{color:l.color,fontWeight:700}}>{fmt(res.slRows.reduce((s,r)=>s+r.pay,0))}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Inspectors */}
+        <div className="card" style={{padding:"16px 18px",marginBottom:14}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:10,marginBottom:10}}>
+            <STitle color={C.blue}>בודקים — ממוצע מחפוד {inspectorChickens>0?Math.round(inspectorChickens).toLocaleString():"—"} עוף</STitle>
+            <div style={{display:"flex",alignItems:"center",gap:8,background:C.blueLight,border:`1.5px solid ${C.blue}44`,borderRadius:4,padding:"6px 12px"}}>
+              <span style={{fontSize:12,color:C.muted}}>תעריף:</span>
+              <input type="number" value={inspectorRate} min="1"
+                onChange={e=>setInspectorRate(parseInt(e.target.value)||3)}
+                style={{width:46,padding:"3px 6px",fontSize:13,border:`1.5px solid ${C.blue}`,borderRadius:3,background:"#fff",fontFamily:"'IBM Plex Mono',monospace",fontWeight:700,color:C.blue,outline:"none",textAlign:"center"}}/>
+              <span style={{fontSize:12,color:C.blue,fontWeight:600}}>אגורות</span>
+            </div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:8,marginBottom:10}}>
+            {workers.inspectors.map(w=>{
+              const on=!!activeInspectors[w.id];
+              const hasOv=inspectorOverride[w.id]!==undefined;
+              const pay=inPay(w.id);
+              return(
+                <div key={w.id} className={`chip ${on?"on-in":""}`}
+                  onClick={()=>setActiveInspectors(p=>({...p,[w.id]:!p[w.id]}))}>
+                  <div style={{fontWeight:600,fontSize:13,minWidth:100}}>{w.name}</div>
+                  {on&&(
+                    <div style={{display:"flex",alignItems:"center",gap:6,marginRight:"auto"}} onClick={e=>e.stopPropagation()}>
+                      {!hasOv&&inspectorChickens>0&&<span className="mono" style={{fontSize:12,color:C.muted}}>{fmt(inAutoPay)}</span>}
+                      <input
+                        type="number" min="0" step="1"
+                        placeholder={inspectorChickens>0?Math.round(inAutoPay):"שכר"}
+                        value={hasOv?inspectorOverride[w.id]:""}
+                        onChange={e=>{
+                          const v=e.target.value;
+                          if(v===""||v===null) setInspectorOverride(p=>{const n={...p};delete n[w.id];return n;});
+                          else setInspectorOverride(p=>({...p,[w.id]:parseFloat(v)||0}));
+                        }}
+                        style={{width:78,padding:"3px 7px",fontSize:12,border:`1.5px solid ${hasOv?C.blue:C.border}`,borderRadius:3,background:"#fff",fontFamily:"'IBM Plex Mono',monospace",fontWeight:700,color:hasOv?C.blue:C.muted,outline:"none",textAlign:"center"}}
+                      />
+                      <span style={{fontSize:10,color:hasOv?C.blue:C.muted}}>{hasOv?"ידני":"₪"}</span>
+                    </div>
+                  )}
+                  {on&&inspectorChickens>0?(
+                    <div style={{textAlign:"left",minWidth:80}}>
+                      {hasOv
+                        ?<div className="override-val">{fmt(pay)}</div>
+                        :<div className="mono" style={{fontWeight:700,color:C.blue,fontSize:13}}>{fmt(pay)}</div>
+                      }
+                      {inMinApplied&&!hasOv&&<div style={{fontSize:9,color:C.red}}>מינימום</div>}
+                    </div>
+                  ):(
+                    <div style={{width:18,height:18,borderRadius:"50%",border:`2px solid ${on?C.blue:C.border}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,color:C.blue}}>{on?"✓":""}</div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          {inspectorChickens>0&&(
+            <div style={{padding:"7px 12px",background:C.blueLight,borderRadius:3,fontSize:12,display:"flex",gap:14,flexWrap:"wrap"}}>
+              {inspectorChickens<=5000
+                ?<><span style={{color:C.muted}}>חישוב: {Math.round(inspectorChickens).toLocaleString()} × {inspectorRate}א' =</span><span className="mono">{fmt(inspectorChickens*inspectorRate/100)}</span><span style={{color:C.muted}}>→ מינימום</span><span className="mono" style={{color:C.blue,fontWeight:700}}>₪200</span></>
+                :<><span style={{color:C.muted}}>5,000 ראשונים: <span className="mono">₪200</span></span><span style={{color:C.muted}}>+{(inspectorChickens-5000).toLocaleString()}: <span className="mono">{fmt((inspectorChickens-5000)*inspectorRate/100)}</span></span></>
+              }
+            </div>
+          )}
+        </div>
+
+        {/* Save */}
+        {totalPay>0&&(
+          <div className="card slide" style={{padding:"18px 22px",borderColor:C.green,background:C.greenLight}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:14}}>
+              <div>
+                <div style={{fontSize:11,color:C.muted,marginBottom:2}}>סה"כ שכר — {fmtDate(date)}</div>
+                <div className="mono" style={{fontSize:26,fontWeight:700,color:C.green}}>{fmt(totalPay)}</div>
+                <div style={{fontSize:11,color:C.muted,marginTop:3}}>
+                  {lineResults.filter(r=>r.active&&r.chickens>0).map(r=>`${r.name}: ${r.chickens.toLocaleString()}`).join(" · ")} · {(machpod1()+machpod2()).toLocaleString()} עוף סה"כ
+                </div>
+              </div>
+              <button className="btn btn-p" style={{fontSize:14,padding:"11px 28px"}} onClick={saveSession}>💾 שמור יום</button>
+            </div>
+          </div>
+        )}
+      </div>
+    )}
+
+    {/* ══ TAB 1 — WORKERS ══ */}
+    {tab===1&&(
+      <div className="slide" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:18}}>
+        <WorkerPanel title="שוחטים" color={C.accent} workers={workers.slaughterers} onRemove={id=>removeWorker("slaughterers",id)}
+          form={<>
+            <input className="input" placeholder="שם השוחט" value={newSl.name} onChange={e=>setNewSl(p=>({...p,name:e.target.value}))}/>
+            <div style={{marginTop:8}}>
+              <Label>תעריף ברירת מחדל</Label>
+              <div style={{display:"flex",gap:8}}>
+                {["22","24"].map(r=>(
+                  <button key={r} onClick={()=>setNewSl(p=>({...p,rate:r}))}
+                    style={{flex:1,padding:"7px 0",border:`1.5px solid ${newSl.rate===r?C.accent:C.border}`,background:newSl.rate===r?C.accent:"transparent",color:newSl.rate===r?"#fff":C.muted,borderRadius:3,cursor:"pointer",fontWeight:700,fontSize:13,fontFamily:"inherit"}}>
+                    {r} אגורות
+                  </button>
+                ))}
+              </div>
+            </div>
+            <button className="btn btn-p btn-sm" style={{marginTop:10,width:"100%"}} onClick={addSlaughterer}>+ הוסף שוחט</button>
+          </>}
+        />
+        <WorkerPanel title="בודקים" color={C.blue} workers={workers.inspectors} onRemove={id=>removeWorker("inspectors",id)}
+          form={<>
+            <input className="input" placeholder="שם הבודק" value={newIn.name} onChange={e=>setNewIn(p=>({...p,name:e.target.value}))}/>
+            <div style={{fontSize:12,color:C.muted,marginTop:8,padding:"8px 12px",background:C.bg,borderRadius:3}}>
+              תעריף קבוע: 3 אגורות · מינימום ₪200 / 5,000 עוף
+            </div>
+            <button className="btn btn-p btn-sm" style={{marginTop:10,width:"100%",background:C.blue}} onClick={addInspector}>+ הוסף בודק</button>
+          </>}
+        />
+        <div className="card" style={{gridColumn:"1/-1",padding:20}}>
+          <STitle color={C.muted}>כללי חישוב</STitle>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(210px,1fr))",gap:16,marginTop:12,fontSize:13}}>
+            {[
+              {title:"שוחטים",color:C.accent,rules:["תעריף: 22 או 24 אגורות/עוף","עוף לשוחט = עוף בליין ÷ שוחטים בליין","שכר = כמות × תעריף ÷ 100","מינימום ₪250 לשוחט","ניתן למלא ידנית בסכום יומי"]},
+              {title:"בודקים",color:C.blue,rules:["תעריף: 3 אגורות/עוף (ניתן לשינוי)","שכר על ממוצע מחפוד 1 ו-2","כל בודק מקבל עצמאית","מינימום ₪200 / 5,000 ראשונים","ניתן למלא ידנית בסכום יומי"]},
+              {title:"ליינים",color:C.gold,rules:["מחפוד 2 — ברירת מחדל פעיל","מחפוד 1 — ברירת מחדל פעיל","רובין / שארית — לפי צורך","כל ליין מחושב בנפרד"]},
+            ].map(s=>(
+              <div key={s.title}>
+                <div style={{fontWeight:700,color:s.color,marginBottom:8}}>{s.title}</div>
+                {s.rules.map(r=><div key={r} style={{color:C.muted,lineHeight:2,paddingRight:10,borderRight:`2px solid ${s.color}33`}}>• {r}</div>)}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* ══ TAB 2 — HISTORY ══ */}
+    {tab===2&&(
+      <div className="slide">
+        {sessions.length===0
+          ?<div className="card" style={{padding:48,textAlign:"center",color:C.muted}}><div style={{fontSize:36,marginBottom:10}}>📋</div><div>אין רשומות. הוסף יום עבודה.</div></div>
+          :sessions.map(s=>(
+            <div key={s.id} className="card" style={{marginBottom:12,overflow:"hidden"}}>
+              <div style={{padding:"11px 18px",background:C.dark,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+                <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+                  <span style={{color:"#fff",fontWeight:700,fontSize:13}}>{fmtDate(s.date)}</span>
+                  <span className="mono" style={{color:C.gold,fontWeight:700}}>{s.totalChickens.toLocaleString()} עוף</span>
+                  <div style={{display:"flex",gap:6}}>
+                    {s.lines.map(l=><span key={l.name} style={{fontSize:11,padding:"1px 8px",borderRadius:10,background:l.color+"44",color:l.color,fontWeight:600}}>{l.name}</span>)}
+                  </div>
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:12}}>
+                  <span className="mono" style={{color:C.green,fontWeight:800,fontSize:15}}>{fmt(s.totalPay)}</span>
+                  <button onClick={()=>removeSession(s.id)} style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:15}}>✕</button>
+                </div>
+              </div>
+              <div style={{padding:"0 18px"}}>
+                {s.lines.map(line=>(
+                  <div key={line.name} style={{padding:"11px 0",borderBottom:`1px solid ${C.border}`}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:7}}>
+                      <div style={{width:8,height:8,borderRadius:"50%",background:line.color}}/>
+                      <span style={{fontWeight:700,fontSize:12,color:line.color}}>{line.name}</span>
+                      <span style={{fontSize:11,color:C.muted}}>{line.chickens.toLocaleString()} עוף</span>
+                    </div>
+                    {line.slaughterers.map(w=>(
+                      <div key={w.id} style={{display:"flex",justifyContent:"space-between",padding:"4px 12px",fontSize:12}}>
+                        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                          <span style={{background:line.color+"22",color:line.color,padding:"1px 7px",borderRadius:2,fontSize:11,fontWeight:700}}>{w.rate}א'</span>
+                          <span style={{fontWeight:600}}>{w.name}</span>
+                          <span style={{color:C.muted}}>{w.chickensEach.toLocaleString()} עוף</span>
+                          {w.minApplied&&<span style={{fontSize:10,color:C.red,background:C.redLight,padding:"1px 5px",borderRadius:2}}>מינימום</span>}
+                          {w.isOverride&&<span style={{fontSize:10,color:C.blue,background:"#d4e5f7",padding:"1px 5px",borderRadius:2}}>מילוי ידני</span>}
+                        </div>
+                        <span className="mono" style={{color:w.isOverride?C.blue:C.accent,fontWeight:700}}>{fmt(w.pay)}</span>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+                {s.inspectors?.length>0&&(
+                  <div style={{padding:"10px 0"}}>
+                    {s.inspectors.map(w=>(
+                      <div key={w.id} style={{display:"flex",justifyContent:"space-between",padding:"4px 12px",fontSize:12}}>
+                        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                          <span style={{background:C.blueLight,color:C.blue,padding:"1px 7px",borderRadius:2,fontSize:11,fontWeight:700}}>בודק</span>
+                          <span style={{fontWeight:600}}>{w.name}</span>
+                          {w.minApplied&&<span style={{fontSize:10,color:C.red,background:C.redLight,padding:"1px 5px",borderRadius:2}}>מינימום</span>}
+                          {w.isOverride&&<span style={{fontSize:10,color:C.blue,background:"#d4e5f7",padding:"1px 5px",borderRadius:2}}>מילוי ידני</span>}
+                        </div>
+                        <span className="mono" style={{color:w.isOverride?C.blue:C.blue,fontWeight:700}}>{fmt(w.pay)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          ))
+        }
+      </div>
+    )}
+
+    {/* ══ TAB 3 — REPORTS ══ */}
+    {tab===3&&(()=>{
+      const monthSet=[...new Set(sessions.map(s=>s.date.slice(0,7)))].sort().reverse();
+      const rSessions=sessions.filter(s=>s.date.startsWith(reportMonth));
+      const filtered=reportLine==="הכל"?rSessions:rSessions.filter(s=>s.lines.some(l=>l.name===reportLine));
+      const rChickens=filtered.reduce((s,sess)=>s+(reportLine==="הכל"?sess.totalChickens:sess.lines.filter(l=>l.name===reportLine).reduce((a,l)=>a+l.chickens,0)),0);
+      const rTotalPay=filtered.reduce((s,r)=>s+r.totalPay,0);
+      const rDays=filtered.length;
+
+      const wm={};
+      filtered.forEach(sess=>{
+        const lines=reportLine==="הכל"?sess.lines:sess.lines.filter(l=>l.name===reportLine);
+        lines.forEach(line=>{
+          line.slaughterers.forEach(w=>{
+            if(!wm[w.id])wm[w.id]={id:w.id,name:w.name,type:"sl",days:0,chickens:0,pay:0,minDays:0,overrideDays:0};
+            wm[w.id].days++;wm[w.id].chickens+=w.chickensEach;wm[w.id].pay+=w.pay;
+            if(w.minApplied)wm[w.id].minDays++;
+            if(w.isOverride)wm[w.id].overrideDays++;
+          });
+        });
+        sess.inspectors?.forEach(w=>{
+          if(!wm[w.id])wm[w.id]={id:w.id,name:w.name,type:"in",days:0,chickens:0,pay:0,minDays:0,overrideDays:0};
+          wm[w.id].days++;wm[w.id].chickens+=sess.totalChickens;wm[w.id].pay+=w.pay;
+          if(w.minApplied)wm[w.id].minDays++;
+          if(w.isOverride)wm[w.id].overrideDays++;
+        });
+      });
+      const wRows=Object.values(wm).sort((a,b)=>b.pay-a.pay);
+      const maxPay=Math.max(...wRows.map(w=>w.pay),1);
+
+      const lineStats=LINES.map(l=>{
+        const lChick=rSessions.reduce((s,sess)=>s+sess.lines.filter(x=>x.name===l.name).reduce((a,x)=>a+x.chickens,0),0);
+        const lPay=rSessions.reduce((s,sess)=>s+sess.lines.filter(x=>x.name===l.name).reduce((a,x)=>a+x.slaughterers.reduce((b,w)=>b+w.pay,0),0),0);
+        const lDays=rSessions.filter(sess=>sess.lines.some(x=>x.name===l.name)).length;
+        return{...l,lChick,lPay,lDays};
+      }).filter(l=>l.lDays>0);
+
+      return(
+        <div className="slide">
+          <div style={{display:"flex",gap:12,marginBottom:18,flexWrap:"wrap",alignItems:"flex-end"}}>
+            <div style={{minWidth:180}}>
+              <Label>חודש</Label>
+              <select className="input" value={reportMonth} onChange={e=>setReportMonth(e.target.value)}>
+                {(monthSet.length?monthSet:[reportMonth]).map(m=><option key={m} value={m}>{fmtMonthHe(m)}</option>)}
+              </select>
+            </div>
+            <div style={{minWidth:155}}>
+              <Label>ליין</Label>
+              <select className="input" value={reportLine} onChange={e=>setReportLine(e.target.value)}>
+                <option value="הכל">כל הליינים</option>
+                {LINES.map(l=><option key={l.name} value={l.name}>{l.name}</option>)}
+              </select>
+            </div>
+            <div style={{display:"flex",gap:6}}>
+              <button className="btn btn-s btn-sm" onClick={exportToExcel}>📥 Excel</button>
+              <button className="btn btn-g btn-sm" onClick={exportToPDF}>📄 PDF</button>
+            </div>
+            <div style={{display:"flex",gap:10,paddingBottom:2}}>
+              {[{l:"ימים",v:rDays,c:C.text},{l:"עוף",v:rChickens.toLocaleString(),c:C.gold},{l:"שכר",v:fmt(rTotalPay),c:C.green},{l:"עובדים",v:wRows.length,c:C.blue}].map(k=>(
+                <div key={k.l} style={{background:C.panel,border:`1px solid ${C.border}`,borderRadius:4,padding:"7px 14px",textAlign:"center"}}>
+                  <div className="mono" style={{fontWeight:700,fontSize:15,color:k.c}}>{k.v}</div>
+                  <div style={{fontSize:11,color:C.muted}}>{k.l}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {rSessions.length===0
+            ?<div className="card" style={{padding:48,textAlign:"center",color:C.muted}}><div style={{fontSize:36,marginBottom:10}}>📊</div><div>אין נתונים ל{fmtMonthHe(reportMonth)}</div></div>
+            :<>
+              {/* Line breakdown */}
+              {reportLine==="הכל"&&lineStats.length>0&&(
+                <div className="card" style={{marginBottom:14,overflow:"hidden"}}>
+                  <div style={{padding:"12px 18px",borderBottom:`1px solid ${C.border}`,fontWeight:700,fontSize:13}}>פירוט לפי ליין — {fmtMonthHe(reportMonth)}</div>
+                  <div style={{display:"grid",gridTemplateColumns:`repeat(${lineStats.length},1fr)`}}>
+                    {lineStats.map((l,i)=>(
+                      <div key={l.name} style={{padding:"16px 18px",borderLeft:i<lineStats.length-1?`1px solid ${C.border}`:"none",borderBottom:`4px solid ${l.color}`}}>
+                        <div style={{fontWeight:700,color:l.color,fontSize:13,marginBottom:8}}>{l.name}</div>
+                        <div className="mono" style={{fontSize:20,fontWeight:700}}>{l.lChick.toLocaleString()}</div>
+                        <div style={{fontSize:11,color:C.muted,marginBottom:6}}>עופות · {l.lDays} ימים</div>
+                        <div className="mono" style={{fontSize:13,color:C.green,fontWeight:700}}>{fmt(l.lPay)}</div>
+                        <div style={{fontSize:11,color:C.muted,marginBottom:8}}>שכר שוחטים</div>
+                        <div style={{height:4,background:C.border,borderRadius:2}}>
+                          <div style={{width:`${lineStats[0].lChick>0?l.lChick/lineStats[0].lChick*100:0}%`,height:"100%",background:l.color,borderRadius:2}}/>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Worker tables */}
+              {["sl","in"].map(type=>{
+                const rows=wRows.filter(w=>w.type===type);
+                if(!rows.length)return null;
+                const isIn=type==="in";
+                const col=isIn?C.blue:C.accent;
+                const title=isIn?"בודקים":"שוחטים";
+                return(
+                  <div key={type} className="card" style={{marginBottom:14,overflow:"hidden"}}>
+                    <div style={{padding:"12px 18px",borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",gap:8}}>
+                      <div style={{width:3,height:16,background:col,borderRadius:2}}/>
+                      <span style={{fontWeight:700,fontSize:13,color:col}}>{title}</span>
+                    </div>
+                    <table>
+                      <thead>
+                        <tr style={{background:isIn?"#f6f8fd":"#faf8f4"}}>
+                          {["שם","נוכחות","עוף מצטבר","שכר לתשלום","% מסה\"כ"].map(h=>(
+                            <th key={h} style={{padding:"9px 16px",textAlign:"right",fontSize:11,color:C.muted,fontWeight:600,borderBottom:`1px solid ${C.border}`}}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rows.map((w,i)=>{
+                          const pct=rTotalPay>0?(w.pay/rTotalPay*100).toFixed(1):0;
+                          return(
+                            <tr key={w.id} style={{borderBottom:`1px solid ${C.border}`,background:i%2===0?"#fff":(isIn?"#f9fbff":"#fdfcf9"),cursor:"pointer"}}
+                              onClick={()=>setWorkerModal({name:w.name,id:w.id})}>
+                              <td style={{padding:"12px 16px",fontWeight:700,fontSize:13}}>
+                                {w.name}
+                                <div style={{display:"flex",gap:5,marginTop:2,flexWrap:"wrap"}}>
+                                  {w.minDays>0&&<span style={{fontSize:10,color:C.red}}>{w.minDays} מינימום</span>}
+                                  {w.overrideDays>0&&<span style={{fontSize:10,color:C.blue}}>{w.overrideDays} ידני</span>}
+                                </div>
+                              </td>
+                              <td style={{padding:"12px 16px"}}>
+                                <span className="mono" style={{fontWeight:700}}>{w.days}</span>
+                                <span style={{fontSize:11,color:C.muted}}> / {rDays}</span>
+                              </td>
+                              <td style={{padding:"12px 16px"}}>
+                                <span className="mono" style={{color:C.muted}}>{w.chickens.toLocaleString()}</span>
+                              </td>
+                              <td style={{padding:"12px 16px"}}>
+                                <div className="mono" style={{fontWeight:700,color:C.green,fontSize:15}}>{fmt(w.pay)}</div>
+                              </td>
+                              <td style={{padding:"12px 16px"}}>
+                                <span className="mono" style={{color:C.muted}}>{pct}%</span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                        <tr style={{background:isIn?"#e8f0fc":C.accentLight,borderTop:`2px solid ${col}44`}}>
+                          <td colSpan={3} style={{padding:"10px 16px",fontSize:12,color:col,fontWeight:700}}>סה"כ {title}</td>
+                          <td style={{padding:"10px 16px"}}>
+                            <span className="mono" style={{fontWeight:700,color:col,fontSize:13}}>{fmt(rows.reduce((s,w)=>s+w.pay,0))}</span>
+                          </td>
+                          <td/>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })}
+
+              {/* Grand total */}
+              <div className="card" style={{padding:20,background:C.dark,border:"none"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:16}}>
+                  <div style={{color:"#fff",fontWeight:700}}>סיכום כולל — {fmtMonthHe(reportMonth)}{reportLine!=="הכל"?` · ${reportLine}`:""}</div>
+                  <div style={{display:"flex",gap:28}}>
+                    {[{l:"ימי עבודה",v:rDays,c:"#fff"},{l:"עופות",v:rChickens.toLocaleString(),c:C.gold},{l:"שכר לתשלום",v:fmt(rTotalPay),c:C.green}].map(k=>(
+                      <div key={k.l} style={{textAlign:"center"}}>
+                        <div className="mono" style={{color:k.c,fontWeight:800,fontSize:17}}>{k.v}</div>
+                        <div style={{color:C.muted,fontSize:11}}>{k.l}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Hidden div for PDF export */}
+              <div id="pdf-content" style={{display:"none"}}>
+                <h1>{fmtMonthHe(reportMonth)}</h1>
+                {wRows.map(w => <div key={w.id}><div>{w.name}: {fmt(w.pay)}</div></div>)}
+              </div>
+            </>
+          }
+        </div>
+      );
+    })()}
+
+    {/* ══ TAB 4 — WORKER DETAILS ══ */}
+    {tab===4&&(
+      <div className="slide">
+        <div style={{marginBottom:16}}>
+          <Label>בחר עובד</Label>
+          <select className="input" onChange={e=>setWorkerModal(e.target.value?JSON.parse(e.target.value):null)}>
+            <option value="">-- בחר עובד --</option>
+            {workers.slaughterers.map(w=><option key={w.id} value={JSON.stringify({name:w.name,id:w.id})}>{w.name} (שוחט)</option>)}
+            {workers.inspectors.map(w=><option key={w.id} value={JSON.stringify({name:w.name,id:w.id})}>{w.name} (בודק)</option>)}
+          </select>
+        </div>
+
+        {workerModal&&(
+          <div className="card">
+            <div style={{fontSize:14,fontWeight:700,marginBottom:14,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <span>{workerModal.name}</span>
+              <button onClick={()=>setWorkerModal(null)} style={{background:"none",border:"none",cursor:"pointer",fontSize:20,color:C.muted}}>✕</button>
+            </div>
+            <table>
+              <thead>
+                <tr style={{background:"#f5f2eb"}}>
+                  {["תאריך","ליין","עופות","שכר","הערות"].map(h=>(
+                    <th key={h} style={{padding:"9px 12px",textAlign:"right",fontSize:11,color:C.muted,fontWeight:600,borderBottom:`1px solid ${C.border}`}}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {sessions.flatMap(sess=>{
+                  const records=[];
+                  sess.lines.forEach(line=>{
+                    line.slaughterers.forEach(w=>{
+                      if(w.id===workerModal.id) records.push({date:sess.date,line:line.name,chickens:w.chickensEach,pay:w.pay,notes:w.isOverride?"מילוי ידני":w.minApplied?"מינימום":""});
+                    });
+                  });
+                  sess.inspectors?.forEach(w=>{
+                    if(w.id===workerModal.id) records.push({date:sess.date,line:"בדיקה",chickens:sess.totalChickens,pay:w.pay,notes:w.isOverride?"מילוי ידני":w.minApplied?"מינימום":""});
+                  });
+                  return records;
+                }).map((r,i)=>(
+                  <tr key={i} style={{borderBottom:`1px solid ${C.border}`,background:i%2===0?"#fff":"#faf9f7"}}>
+                    <td style={{padding:"9px 12px",fontSize:12}}>{fmtDate(r.date)}</td>
+                    <td style={{padding:"9px 12px",fontSize:12}}>{r.line}</td>
+                    <td style={{padding:"9px 12px",fontSize:12}}>{r.chickens.toLocaleString()}</td>
+                    <td style={{padding:"9px 12px",fontSize:12,fontWeight:700,color:C.green}}>{fmt(r.pay)}</td>
+                    <td style={{padding:"9px 12px",fontSize:11,color:C.muted}}>{r.notes}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div style={{marginTop:14,padding:"12px",background:C.bg,borderRadius:4,textAlign:"center"}}>
+              <div style={{fontSize:12,color:C.muted}}>סה"כ שכר</div>
+              <div className="mono" style={{fontSize:18,fontWeight:700,color:C.green,marginTop:4}}>
+                {fmt(sessions.reduce((s,sess)=>{
+                  let p=0;
+                  sess.lines.forEach(line=>{
+                    line.slaughterers.forEach(w=>{
+                      if(w.id===workerModal.id) p+=w.pay;
+                    });
+                  });
+                  sess.inspectors?.forEach(w=>{
+                    if(w.id===workerModal.id) p+=w.pay;
+                  });
+                  return s+p;
+                },0))}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    )}
+
+  </div>
+</div>
+```
+
+);
+}
+
+ReactDOM.createRoot(document.getElementById(“root”)).render(<App/>);
+</script>
+
+</body>
+</html>
